@@ -1,0 +1,855 @@
+---
+title: "ED-Report 5 (Data summary and matching)"
+date: "15/7/2024"
+output: html_document
+code_folding: hide
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+``` {r, warning=FALSE ,message=FALSE , echo=FALSE}
+library(dplyr)
+library(zoo)
+library(ggplot2)
+library(readr)
+library(fuzzyjoin)
+library(tidyr)
+library (MatchIt) 
+library(fastDummies)
+library(stargazer)
+
+selected <- read_csv("/Users/mina/Desktop/AE project/sub_select.csv", col_types = cols(X1 = col_skip()))
+
+
+sub_select <- selected %>%
+  rename(shift_date = shift_date.y)%>%
+  rename(shift_block = shift_block.y)%>%
+  rename(ageyrs = ageyrs.y)%>%
+  rename(sex = sex.y)%>%
+  rename(site = site.y)%>%
+  rename(chronic_condition = chronic_condition.y)%>%
+  rename(number_ed_md_involved = number_ed_md_involved.y)%>%
+  rename(ctas = ctas.y)%>%
+  rename(pt_disposition = pt_disposition.y)%>%
+  rename(AEoutcome = AEoutcome.y)%>%
+  rename(number_ae = number_ae.y)%>%
+  rename(censushour = censushour.y)%>%
+  rename(wtbshour = wtbshour.x)
+sub_select <- sub_select %>% mutate(yq = as.yearqtr(shift_date, format = "%Y-%m-%d"))
+
+sub_select <- sub_select %>% group_by(site, shift_block, shift_date, ctas) %>% mutate(avg_waiting_to_be_seen_shift=mean(waiting_to_be_seen,na.rm = TRUE))%>% #Avg waiting_to_be_seen of each ctas level within each shift
+mutate(avg_wtbshour_shift=mean(wtbshour,na.rm = TRUE))%>%#Avg wtbshour of each ctas level within each shift
+mutate(avg_los_shift=mean(los,na.rm = TRUE))%>%
+mutate(avg_censushour_shift=mean(censushour,na.rm = TRUE))
+
+
+sub_select$los_cat <- "LOW"
+sub_select$los_cat[sub_select$waiting_to_be_seen> mean(sub_select$waiting_to_be_seen, na.rm=TRUE)] <- "TRUE"
+sub_select$shift_los_cat <- "LOW"
+sub_select$shift_los_cat[sub_select$avg_los_shift> median(sub_select$avg_los_shift, na.rm=TRUE)] <- "TRUE"
+
+
+sub_select$waiting_to_be_seen_cat <- "LOW"
+sub_select$waiting_to_be_seen_cat[sub_select$waiting_to_be_seen> mean(sub_select$waiting_to_be_seen, na.rm=TRUE)] <- "TRUE"
+sub_select$shift_waiting_to_be_seen_cat <- "LOW"
+sub_select$shift_waiting_to_be_seen_cat[sub_select$avg_waiting_to_be_seen_shift> median(sub_select$avg_waiting_to_be_seen_shift, na.rm=TRUE)] <- "TRUE"
+
+
+sub_select$wtbshour_cat <- "LOW"
+sub_select$wtbshour_cat[sub_select$wtbshour> mean(sub_select$wtbshour, na.rm=TRUE)] <- "TRUE"
+sub_select$shift_wtbshour_cat <- "LOW"
+sub_select$shift_wtbshour_cat[sub_select$avg_wtbshour_shift> median(sub_select$avg_wtbshour_shift, na.rm=TRUE)] <- "TRUE"
+
+sub_select$censushour_cat <- "LOW"
+sub_select$censushour_cat[sub_select$censushour> mean(sub_select$censushour, na.rm=TRUE)] <- "TRUE"
+sub_select$shift_censushour_cat <- "LOW"
+sub_select$shift_censushour_cat[sub_select$avg_censushour_shift> median(sub_select$avg_censushour_shift, na.rm=TRUE)] <- "TRUE"
+
+sub_select$number_ae[is.na(sub_select$number_ae)]<-0
+
+sub_select$pt_disposition_new <- 0
+sub_select$pt_disposition_new[sub_select$pt_disposition==0] <-1
+sub_select$pt_disposition_new[sub_select$pt_disposition==1|sub_select$pt_disposition==4] <-2
+sub_select$pt_disposition_new[sub_select$pt_disposition==2|sub_select$pt_disposition==3] <-3
+```
+
+``` {r, warning=FALSE ,message=FALSE, echo=FALSE }
+# Ensure AEoutcome is a factor
+sub_select$preventable <- as.factor(sub_select$preventable)
+
+# Perform the t-test
+t_test_result <- t.test(waiting_to_be_seen ~ preventable, data = sub_select)
+
+# Print the result
+print(t_test_result)
+```
+``` {r, warning=FALSE ,message=FALSE, echo=FALSE }
+# Ensure AEoutcome is a factor
+sub_select$preventable <- as.factor(sub_select$preventable)
+
+# Perform the t-test
+t_test_result1 <- t.test(los ~ preventable, data = sub_select)
+
+# Print the result
+print(t_test_result1)
+```
+
+``` {r, warning=FALSE ,message=FALSE, echo=FALSE }
+# Ensure AEoutcome is a factor
+sub_select$preventable <- as.factor(sub_select$preventable)
+
+# Perform the t-test
+t_test_result2 <- t.test(wtbshour ~ preventable, data = sub_select)
+
+# Print the result
+print(t_test_result2)
+```
+``` {r, warning=FALSE ,message=FALSE, echo=FALSE }
+# Ensure AEoutcome is a factor
+sub_select$preventable <- as.factor(sub_select$preventable)
+
+# Perform the t-test
+t_test_result3 <- t.test(censushour ~ preventable, data = sub_select)
+
+# Print the result
+print(t_test_result3)
+```
+
+### **1- DATA SUMMARY**:
+In this section, we investigated the raw data to see any potential specific pattern in the data. First, we checked number of **AEoutcome** and its ratio in **each quarter**:
+
+**================ Precentage of AEoutcome in each quarter ================**
+``` {r, warning=FALSE ,message=FALSE, echo=FALSE }
+out <- table(sub_select$yq, sub_select$preventable)  # shows number of AE outcome in each quarter and year
+out <- cbind(out, Precentage = out[,2]/rowSums(out))
+out
+```
+
+``` {r, warning=FALSE ,message=FALSE, echo=FALSE}
+
+out <- as.data.frame(out)
+out <- out %>% mutate(n=out[,2]+out[,1])
+out <-  out %>% mutate(se=1.96*sqrt(Precentage*(1-Precentage)/n))
+x <- rownames(out)
+ggplot(data=out, aes(x=x, y=Precentage, fill = x)) +
+  geom_bar(stat="identity", position=position_dodge()) +
+  geom_errorbar(aes(ymin=Precentage-se, ymax=Precentage+se), width=.2,
+                position=position_dodge(.9))+ 
+  theme(legend.position = "none")+
+  xlab("Year/Quarter")+
+  geom_text(aes(label=round(Precentage, digit=3)), vjust=-0.5 , hjust=1.2, color="black", position = position_dodge(0.9),size=3)
+
+
+```
+```
+
+**================ Precentage of AEoutcome in each site ================**
+``` {r, warning=FALSE ,message=FALSE, echo=FALSE }
+out <- table(sub_select$yq, sub_select$preventable)  # shows number of AE outcome in each quarter and year
+out <- cbind(out, Precentage = out[,2]/rowSums(out))
+out
+```
+
+``` {r, warning=FALSE ,message=FALSE, echo=FALSE}
+out <- as.data.frame(out)
+out <- out %>% mutate(n=out[,2]+out[,1])
+out <-  out %>% mutate(se=1.96*sqrt(Precentage*(1-Precentage)/n))
+x <- rownames(out)
+ggplot(data=out, aes(x=x, y=Precentage, fill = x)) +
+  geom_bar(stat="identity", position=position_dodge()) +
+  geom_errorbar(aes(ymin=Precentage-se, ymax=Precentage+se), width=.2,
+                position=position_dodge(.9))+ 
+  theme(legend.position = "none")+
+  xlab("Site Number")+
+  geom_text(aes(label=round(Precentage, digit=3)), vjust=-0.5,hjust=1.05, color="black", position = position_dodge(0.9),size=3)
+
+```
+
+``` {r, warning=FALSE ,message=FALSE, echo=FALSE}
+# Calculate the average and standard error
+summary_wtbshour <- sub_select %>%
+  group_by(yq) %>%
+  summarize(
+    average_wtbshour = mean(wtbshour, na.rm = TRUE),
+    se = sd(wtbshour, na.rm = TRUE) / sqrt(n())
+  )
+
+# Create the percentage column
+summary_wtbshour <- summary_wtbshour %>%
+  mutate(percentage = (average_wtbshour / sum(average_wtbshour)) * 100)
+
+# Plot with error bars
+ggplot(summary_wtbshour, aes(x = yq, y = percentage)) +
+  geom_bar(stat = "identity", fill = "lightgreen", alpha = 0.7) +
+  geom_errorbar(aes(ymin = percentage - se, ymax = percentage + se), width = 0.2) +
+  labs(title = "Percentage of waiting to be seen patients in each quarter",
+       x = "each quarter",
+       y = "Percentage (%)") +
+  theme_minimal()
+
+```
+
+``` {r, warning=FALSE ,message=FALSE, echo=FALSE }
+average_censushour <- sub_select %>%
+  group_by(yq) %>%
+  summarize(average_censushour = mean(censushour, na.rm = TRUE))
+print(average_censushour)
+```
+
+
+
+
+``` {r, warning=FALSE ,message=FALSE, echo=FALSE}
+
+# Calculate the average and standard error
+summary_censushour <- sub_select %>%
+  group_by(yq) %>%
+  summarize(
+    average_censushour = mean(censushour, na.rm = TRUE),
+    se = sd(censushour, na.rm = TRUE) / sqrt(n())
+  )
+
+# Create the percentage column
+summary_censushour <- summary_censushour %>%
+  mutate(percentage = (average_censushour/ sum(average_censushour)) * 100)
+
+# Plot with error bars
+ggplot(summary_censushour, aes(x = yq, y = percentage)) +
+  geom_bar(stat = "identity", fill = "lightgreen", alpha = 0.7) +
+  geom_errorbar(aes(ymin = percentage - se, ymax = percentage + se), width = 0.2) +
+  labs(title = "Percentage of census patients in each quarter",
+       x = "each quarter",
+       y = "Percentage (%)") +
+  theme_minimal()
+
+```
+
+#### **1-1- Feature 1:waiting_to_be_seen**
+
+
+``` {r, warning=FALSE ,message=FALSE, echo=FALSE}
+summary(sub_select$waiting_to_be_seen)
+summary(sub_select$wtbshour)
+summary(sub_select$censushour)
+```
+ We must also remember that we have **441 NA** values for waiting to be seen feature. We probably need to remove these observations in future analysis as imputing these values may result in wrong number and will affect our analysis. To investigate this feature more, we can visualize average of waiting to be seen for each type AEoutcome as shown below:
+
+``` {r, warning=FALSE ,message=FALSE, echo=FALSE}
+g <- sub_select %>% select(waiting_to_be_seen, AEoutcome) %>% group_by(AEoutcome) %>% 
+  summarise(Ave_waiting_to_be_seen=mean(waiting_to_be_seen, na.rm=TRUE), n=n(), sd=sd(waiting_to_be_seen,na.rm=TRUE), se=1.96*sd/sqrt(n))
+
+ggplot(data=g, aes(x=AEoutcome, y=Ave_waiting_to_be_seen, fill=AEoutcome)) + 
+  geom_bar(stat="identity" , position=position_dodge()) +  
+  geom_errorbar(aes(ymin=Ave_waiting_to_be_seen-se, ymax=Ave_waiting_to_be_seen+se), width=.2,position=position_dodge(.9))+ 
+  scale_fill_manual(values=c("turquoise3", "orangered3"))+
+  geom_text(aes(label=round(Ave_waiting_to_be_seen, digit=1)), vjust=-0.5, hjust=1.7, color="black", size=3) +
+  labs(fill = "AEoutcome (Adverse Event Outcome)")+
+  ylab("Average waiting to be seen hours")
+```
+The analysis reveals that there is no significant difference in the average waiting to be seen between patients with positive and negative AE outcomes. The small difference observed does not suggest a strong relationship between waiting to be seen and the occurrence of adverse events. The variability indicated by the error bars further supports that waiting time alone may not be a determining factor for AE outcomes.
+
+We can also plot average waiting to be seen for each site for each type of AEoutcome as shown below:
+``` {r, warning=FALSE ,message=FALSE, echo=FALSE}
+f <- sub_select %>% select(wtbshour, AEoutcome) %>% group_by(AEoutcome) %>% 
+  summarise(Ave_wtbshour=mean(wtbshour, na.rm=TRUE), n=n(), sd=sd(wtbshour,na.rm=TRUE), se=1.96*sd/sqrt(n))
+
+ggplot(data=f, aes(x=AEoutcome, y=Ave_wtbshour, fill=AEoutcome)) + 
+  geom_bar(stat="identity" , position=position_dodge()) +  
+  geom_errorbar(aes(ymin=Ave_wtbshour-se, ymax=Ave_wtbshour+se), width=.2,position=position_dodge(.9))+ 
+  scale_fill_manual(values=c("turquoise3", "orangered3"))+
+  geom_text(aes(label=round(Ave_wtbshour, digit=1)), vjust=-0.5, hjust=1.7, color="black", size=3) +
+  labs(fill = "AEoutcome (Adverse Event Outcome)")+
+  ylab("Average waiting to be seen patients")
+```
+``` {r, warning=FALSE ,message=FALSE, echo=FALSE}
+h <- sub_select %>% select(censushour, AEoutcome) %>% group_by(AEoutcome) %>% 
+  summarise(Ave_censushour=mean(censushour, na.rm=TRUE), n=n(), sd=sd(censushour,na.rm=TRUE), se=1.96*sd/sqrt(n))
+
+ggplot(data=h, aes(x=AEoutcome, y=Ave_censushour, fill=AEoutcome)) + 
+  geom_bar(stat="identity" , position=position_dodge()) +  
+  geom_errorbar(aes(ymin=Ave_censushour-se, ymax=Ave_censushour+se), width=.2,position=position_dodge(.9))+ 
+  scale_fill_manual(values=c("turquoise3", "orangered3"))+
+  geom_text(aes(label=round(Ave_censushour, digit=1)), vjust=-0.5, hjust=1.7, color="black", size=3) +
+  labs(fill = "AEoutcome (Adverse Event Outcome)")+
+  ylab("Average census patients")
+```
+
+
+``` {r, warning=FALSE ,message=FALSE, echo=FALSE}
+g <- sub_select %>% select(site, waiting_to_be_seen, AEoutcome) %>% group_by(site, AEoutcome) %>% 
+  summarise(Ave_waiting_to_be_seen=mean(waiting_to_be_seen, na.rm=TRUE), n=n(), sd=sd(waiting_to_be_seen,na.rm=TRUE), se=1.96*sd/sqrt(n))
+
+ggplot(data=g, aes(x=site, y=Ave_waiting_to_be_seen, fill=AEoutcome)) +
+  geom_bar(stat="identity", position=position_dodge()) +
+  geom_errorbar(aes(ymin=Ave_waiting_to_be_seen-se, ymax=Ave_waiting_to_be_seen+se), width=.2,position=position_dodge(.9))+
+  scale_x_continuous(breaks=c(0:8))+
+  scale_fill_manual(values=c("turquoise3", "orangered3"))+
+  geom_text(aes(label=round(Ave_waiting_to_be_seen, digit=1)), vjust=-0.3, hjust=1.1, color="black", position = position_dodge(0.9),size=2.2)+
+  ylab("Average waiting to be seen hours")
+
+```
+``` {r, warning=FALSE ,message=FALSE, echo=FALSE}
+f <- sub_select %>% select(site, wtbshour, AEoutcome) %>% group_by(site, AEoutcome) %>% 
+  summarise(Ave_wtbshour=mean(wtbshour, na.rm=TRUE), n=n(), sd=sd(wtbshour,na.rm=TRUE), se=1.96*sd/sqrt(n))
+
+ggplot(data=f, aes(x=site, y=Ave_wtbshour, fill=AEoutcome)) +
+  geom_bar(stat="identity", position=position_dodge()) +
+  geom_errorbar(aes(ymin=Ave_wtbshour-se, ymax=Ave_wtbshour+se), width=.2,position=position_dodge(.9))+
+  scale_x_continuous(breaks=c(0:8))+
+  scale_fill_manual(values=c("turquoise3", "orangered3"))+
+  geom_text(aes(label=round(Ave_wtbshour, digit=1)), vjust=-0.3, hjust=1.1, color="black", position = position_dodge(0.9),size=2.2)+
+  ylab("Average waiting to be seen patients")
+
+```
+``` {r, warning=FALSE ,message=FALSE, echo=FALSE}
+h <- sub_select %>% select(site, censushour, AEoutcome) %>% group_by(site, AEoutcome) %>% 
+  summarise(Ave_censushour=mean(censushour, na.rm=TRUE), n=n(), sd=sd(censushour,na.rm=TRUE), se=1.96*sd/sqrt(n))
+
+ggplot(data=h, aes(x=site, y=Ave_censushour, fill=AEoutcome)) +
+  geom_bar(stat="identity", position=position_dodge()) +
+  geom_errorbar(aes(ymin=Ave_censushour-se, ymax=Ave_censushour+se), width=.2,position=position_dodge(.9))+
+  scale_x_continuous(breaks=c(0:8))+
+  scale_fill_manual(values=c("turquoise3", "orangered3"))+
+  geom_text(aes(label=round(Ave_censushour, digit=1)), vjust=-0.3, hjust=1.1, color="black", position = position_dodge(0.9),size=2.2)+
+  ylab("Average census patients")
+
+```
+
+As demonstrated in the figure above, the average waiting to be seen with positive AE outcomes is similar to those with negative AE outcomes across different sites. 
+No distinct pattern emerges between waiting to be seen and AE outcomes across various ICU sites. No consistent pattern is evident between the average waiting to be seen and AE outcomes across different ICU sites.
+
+In some sites (e.g., 3 and 8), patients with positive AE outcomes waiting to be seen  significantly greater, while in others (e.g., 1 and 2), the differences are minimal.
+
+The error bars indicate the variability of waiting to be seen within each site. Some sites (e.g., 0 and 2) have larger variability, suggesting a wider range of waiting to be seen.
+
+
+As it's shown from the above figure, generally we can say that the average age of patients with positive AEoutcome is larger than patients with negative AEoutcome in most sites. This trend, however, is not necessarily correct as in site 7 and 8 we can see that the average age for patients with negative AEoutcome is larger.
+Same analogy can be used to investigate age variation in each ctas:
+
+
+#### **1-4- Feature 4: ctas**
+
+``` {r, warning=FALSE ,message=FALSE, echo=FALSE}
+g <- sub_select %>% select(ctas, waiting_to_be_seen, AEoutcome) %>% group_by(ctas, AEoutcome) %>% 
+  summarise(Ave_waiting_to_be_seen=mean(waiting_to_be_seen, na.rm=TRUE),n=n(), sd=sd(waiting_to_be_seen,na.rm=TRUE), se=1.96*sd/sqrt(n))
+
+ggplot(data=g, aes(x=ctas, y=Ave_waiting_to_be_seen, fill=AEoutcome)) +
+  geom_bar(stat="identity", position=position_dodge()) +
+  geom_errorbar(aes(ymin=Ave_waiting_to_be_seen-se, ymax=Ave_waiting_to_be_seen+se), width=.2,position=position_dodge(.9))+
+  scale_x_continuous(breaks=c(0:8))+
+  scale_fill_manual(values=c("turquoise3", "orangered3"))+
+  geom_text(aes(label=round(Ave_waiting_to_be_seen, digit=1)), vjust=-0.5, hjust=1.1, color="black", position = position_dodge(0.9),size=3)+
+  ylab("Average waiting to be seen hours")
+
+
+```
+The analysis reveals varying relationships between waiting to be seen and AE outcomes across different CTAS levels:
+
+CTAS 1 and 5 show that patients with positive AE outcomes have significantly shorter waiting to be seen compared to those with negative outcomes.
+
+CTAS 4 demonstrates the opposite trend, where positive AE outcomes are associated with longer waiting to be seen.
+
+CTAS 2 and 3 indicate minimal differences in waiting times between the two groups.
+
+``` {r, warning=FALSE ,message=FALSE, echo=FALSE}
+f <- sub_select %>% select(ctas, wtbshour, AEoutcome) %>% group_by(ctas, AEoutcome) %>% 
+  summarise(Ave_wtbshour=mean(wtbshour, na.rm=TRUE),n=n(), sd=sd(wtbshour,na.rm=TRUE), se=1.96*sd/sqrt(n))
+
+ggplot(data=f, aes(x=ctas, y=Ave_wtbshour, fill=AEoutcome)) +
+  geom_bar(stat="identity", position=position_dodge()) +
+  geom_errorbar(aes(ymin=Ave_wtbshour-se, ymax=Ave_wtbshour+se), width=.2,position=position_dodge(.9))+
+  scale_x_continuous(breaks=c(0:8))+
+  scale_fill_manual(values=c("turquoise3", "orangered3"))+
+  geom_text(aes(label=round(Ave_wtbshour, digit=1)), vjust=-0.5, hjust=1.1, color="black", position = position_dodge(0.9),size=3)+
+  ylab("Average waiting to be seen patients")
+
+
+```
+
+``` {r, warning=FALSE ,message=FALSE, echo=FALSE}
+f <- sub_select %>% select(ctas, censushour, AEoutcome) %>% group_by(ctas, AEoutcome) %>% 
+  summarise(Ave_censushour=mean(censushour, na.rm=TRUE),n=n(), sd=sd(censushour,na.rm=TRUE), se=1.96*sd/sqrt(n))
+
+ggplot(data=f, aes(x=ctas, y=Ave_censushour, fill=AEoutcome)) +
+  geom_bar(stat="identity", position=position_dodge()) +
+  geom_errorbar(aes(ymin=Ave_censushour-se, ymax=Ave_censushour+se), width=.2,position=position_dodge(.9))+
+  scale_x_continuous(breaks=c(0:8))+
+  scale_fill_manual(values=c("turquoise3", "orangered3"))+
+  geom_text(aes(label=round(Ave_censushour, digit=1)), vjust=-0.5, hjust=1.1, color="black", position = position_dodge(0.9),size=3)+
+  ylab("Average census patients")
+
+
+```
+#### **1-5- Feature 5: shift_block**
+
+``` {r, warning=FALSE ,message=FALSE, echo=FALSE}
+
+g <- sub_select %>% select(shift_block, waiting_to_be_seen, AEoutcome) %>% group_by(shift_block, AEoutcome) %>% 
+  summarise(Ave_waiting_to_be_seen=mean(waiting_to_be_seen, na.rm=TRUE),n=n(), sd=sd(waiting_to_be_seen,na.rm=TRUE), se=1.96*sd/sqrt(n))
+
+ggplot(data=g, aes(x=shift_block, y=Ave_waiting_to_be_seen, fill=AEoutcome)) +
+  geom_bar(stat="identity", position=position_dodge()) +
+  geom_errorbar(aes(ymin=Ave_waiting_to_be_seen-se, ymax=Ave_waiting_to_be_seen+se), width=.2,position=position_dodge(.9))+
+  scale_x_continuous(breaks=c(0:8))+
+  scale_fill_manual(values=c("turquoise3", "orangered3"))+
+  geom_text(aes(label=round(Ave_waiting_to_be_seen, digit=1)), vjust=-0.5, hjust=1.5, color="black", position = position_dodge(0.9),size=3)+
+  ylab("Average waiting to be seen hours")
+
+
+```
+``` {r, warning=FALSE ,message=FALSE, echo=FALSE}
+
+f <- sub_select %>% select(shift_block, wtbshour, AEoutcome) %>% group_by(shift_block, AEoutcome) %>% 
+  summarise(Ave_wtbshour=mean(wtbshour, na.rm=TRUE),n=n(), sd=sd(wtbshour,na.rm=TRUE), se=1.96*sd/sqrt(n))
+
+ggplot(data=f, aes(x=shift_block, y=Ave_wtbshour, fill=AEoutcome)) +
+  geom_bar(stat="identity", position=position_dodge()) +
+  geom_errorbar(aes(ymin=Ave_wtbshour-se, ymax=Ave_wtbshour+se), width=.2,position=position_dodge(.9))+
+  scale_x_continuous(breaks=c(0:8))+
+  scale_fill_manual(values=c("turquoise3", "orangered3"))+
+  geom_text(aes(label=round(Ave_wtbshour, digit=1)), vjust=-0.5, hjust=1.5, color="black", position = position_dodge(0.9),size=3)+
+  ylab("Average waiting to be seen patients")
+
+
+```
+``` {r, warning=FALSE ,message=FALSE, echo=FALSE}
+
+f <- sub_select %>% select(shift_block, censushour, AEoutcome) %>% group_by(shift_block, AEoutcome) %>% 
+  summarise(Ave_censushour=mean(censushour, na.rm=TRUE),n=n(), sd=sd(censushour,na.rm=TRUE), se=1.96*sd/sqrt(n))
+
+ggplot(data=f, aes(x=shift_block, y=Ave_censushour, fill=AEoutcome)) +
+  geom_bar(stat="identity", position=position_dodge()) +
+  geom_errorbar(aes(ymin=Ave_censushour-se, ymax=Ave_censushour+se), width=.2,position=position_dodge(.9))+
+  scale_x_continuous(breaks=c(0:8))+
+  scale_fill_manual(values=c("turquoise3", "orangered3"))+
+  geom_text(aes(label=round(Ave_censushour, digit=1)), vjust=-0.5, hjust=1.5, color="black", position = position_dodge(0.9),size=3)+
+  ylab("Average census patients")
+
+```
+The analysis reveals the following insights regarding the relationship between waiting to be seen and AE outcomes across different shift blocks:
+
+Shift Block 0 shows that patients with positive AE outcomes have shorter waiting to be seen compared to those with negative outcomes.
+Shift Block 1 indicates no significant difference in waiting to be seen between the two AE outcome groups, with nearly identical averages.
+Shift Block 2 shows a minimal difference, with slightly longer waiting to be seen for patients with positive AE outcomes.
+Overall, the data suggests that the relationship between waiting to be seen and AE outcomes varies slightly across different shift blocks. The differences observed are not substantial enough to indicate a strong correlation between waiting to be seen and AE outcomes in this context.
+
+
+### **2- Matching**
+
+In order to investigate the effect of **waiting to be seen** feature on **AEoutcome**, we can use matching algorithm to find similar cases with negative and positive AEoutcome, put these cases in two different groups and then investigate the relationship between waiting to be seen for matched groups. To do this, we selected features that are listed below:
+
+* shift_block
+* ageyrs
+* site
+* ctas 
+* waiting to be seen
+
+  In order to match cases from positive and negative AEoutcome we will go through these steps:
+  
+ 1- Creating two pools of data. One for positive and one for negative AEoutcome
+ **Please note that since "waiting to be seen" is the parameter of interest, there is no point to for keeping NA values, so we removed rows which contained NA in waiting to be seen column.**
+
+ 2- Preparing dataset to pass it to **"Fuzzyjoin"** function
+ 
+ 3- Using “Fuzzyjoin” for matching data:
+
+In order to find matches between two dataframes, we are going to use “Fuzzymatch”. The procedure we decided to use for matching is explained below:
+
+* **Exact** matching for site feature
+* **Exact** matching for ctas feature
+* **Exact** matching for shift_block feature
+* ageyrs within the range of **-20% and +20%** is considered as match value
+
+Below is the result of matching algorithm:
+
+``` {r, warning=FALSE ,message=FALSE, echo=FALSE}
+# separating TRUE AEoutcome
+AE_positive <- subset(sub_select, sub_select$AEoutcome=="TRUE")
+#AE_positive has 8 NA value for "los" for now we remove those rows 
+AE_positive <- AE_positive[which(!is.na(AE_positive$waiting_to_be_seen)),]
+# separating FALSE AEoutcome
+AE_Negative <- subset(sub_select, sub_select$AEoutcome=="FALSE")
+# Selecting specific feature for matching (shift_block, ageyrs, site, ctas, los)
+AE_positive_s <- AE_positive %>% select(record_id, shift_block, ageyrs, site, ctas, waiting_to_be_seen, avg_waiting_to_be_seen_shift,shift_waiting_to_be_seen_cat ,number_ae, AEoutcome)
+# Renaming AE_negative columns and make it proper to pass to fuzzyjoin function
+AE_Negative_s <- AE_Negative %>% select(record_id, shift_block, ageyrs, site, ctas, waiting_to_be_seen, avg_waiting_to_be_seen_shift,shift_waiting_to_be_seen_cat ,number_ae, AEoutcome)
+AE_Negative_s <- AE_Negative_s %>% rename(record_id_n=record_id ,shift_block_n = shift_block, ageyrs_n=ageyrs, 
+                                          site_n=site, ctas_n=ctas, waiting_to_be_seen_n=waiting_to_be_seen, avg_waiting_to_be_seen_shift_n= avg_waiting_to_be_seen_shift, 
+                                          shift_waiting_to_be_seen_cat_n=shift_waiting_to_be_seen_cat ,number_ae_n=number_ae, AEoutcome_n=AEoutcome)
+sub_select%>%mutate
+
+AE_positive_s$ageyrs_start <- AE_positive$ageyrs* 0.8  # first adding a range for acceptable ageyrs
+AE_positive_s$ageyrs_end <- AE_positive$ageyrs * 1.2   # first adding a range for acceptable ageyrs
+
+result_match<- fuzzyjoin::fuzzy_left_join(
+  AE_positive_s, AE_Negative_s,
+  by = c("shift_block" = "shift_block_n",
+         "site" = "site_n",
+         "ctas" = "ctas_n",
+         "ageyrs_start" = "ageyrs_n",
+         "ageyrs_end" = "ageyrs_n"),
+  match_fun = list(`==`, `==`,`==`, `<=`, `>=`))
+
+result_match <- result_match[-c(1,14)]
+result_match <-result_match[which(!is.na(result_match$waiting_to_be_seen_n)),]
+
+nm1 <- sub("(\\d+|_n)$", "", names(result_match)) # Changing wide table format to long table format
+lst1 <-  lapply(split.default(result_match, nm1), unlist, use.names = FALSE)
+result_match_long <- data.frame(lapply(lst1, `length<-`, max(lengths(lst1))))[unique(nm1)]
+
+result_match_modified <-result_match[which(!is.na(result_match$waiting_to_be_seen_n)),]
+result_match_modified <- ungroup(result_match_modified)
+result_match_long<-result_match_long[which(!is.na(result_match_long$waiting_to_be_seen)),]
+
+
+```
+
+
+```{r, layout="l-body-outset" , warning=FALSE ,message=FALSE, echo=FALSE}
+
+library(knitr)
+kable(head(result_match,10))
+
+```
+
+In the above table, the first 12 columns are related to positive AEoutcome group and the next columns are found matches from negative AEoutcome group. **Note that for one observation from positive AEoutcome group, we can have more than 1 match from negative AEoutcome group**. Since for each observation we can have multiple matches, we took an average from "waiting to be seen" of matches. Now we can compare the average "waiting to be seen" for different groups (negative and positive AEoutcome).
+
+
+``` {r, layout="l-body-outset" , warning=FALSE ,message=FALSE, echo=FALSE}
+
+g <- result_match_long %>% select(waiting_to_be_seen,AEoutcome) %>% group_by(AEoutcome) %>% summarise(Ave_waiting_to_be_seen=mean(waiting_to_be_seen, na.rm=TRUE), n=n(), sd=sd(waiting_to_be_seen,na.rm=TRUE), se=1.96*sd/sqrt(n))
+
+ggplot(data=g, aes(x=AEoutcome, y=Ave_waiting_to_be_seen, fill=AEoutcome)) + 
+  geom_bar(stat="identity" , position=position_dodge()) + 
+  geom_errorbar(aes(ymin=Ave_waiting_to_be_seen-se, ymax=Ave_waiting_to_be_seen+se), width=.2,position=position_dodge(.9))+
+  scale_fill_manual(values=c("turquoise3", "orangered3"))+
+  geom_text(aes(label=round(Ave_waiting_to_be_seen, digit=1)), vjust=-0.5,hjust=1.8, color="black", size=3) +
+  labs(fill = "AEoutcome (Adverse Event Outcome)")+
+  ylab("Average waiting to be seen hours")
+
+```
+The analysis reveals a clear difference in average waiting to be seen between patients with and without adverse events. Patients with positive AE outcomes waiting to be seen greater on average (102.6 units) compared to those with negative AE outcomes (93.6 units). This suggests that greater waiting to be seen patients may be associated with a higher likelihood of adverse events, indicating a potential area for further investigation to improve patient outcomes by reducing queue.
+
+We can also compare the average waiting to be seen for matched data for different ctas:
+
+``` {r, layout="l-body-outset" , warning=FALSE ,message=FALSE, echo=FALSE}
+
+g <- result_match_long %>% select(ctas, waiting_to_be_seen, AEoutcome) %>% group_by(ctas, AEoutcome) %>% summarise(Ave_waiting_to_be_seen=mean(waiting_to_be_seen, na.rm=TRUE), n=n(), sd=sd(waiting_to_be_seen,na.rm=TRUE), se=1.96*sd/sqrt(n))
+
+ggplot(data=g, aes(x=ctas, y=Ave_waiting_to_be_seen, fill=AEoutcome)) + 
+  geom_bar(stat="identity" , position=position_dodge()) +
+   geom_errorbar(aes(ymin=Ave_waiting_to_be_seen-se, ymax=Ave_waiting_to_be_seen+se), width=.2,position=position_dodge(.9))+
+  scale_fill_manual(values=c("turquoise3", "orangered3"))+
+  geom_text(aes(label=round(Ave_waiting_to_be_seen, digit=1)), vjust=-0.5,hjust=1.3, color="black", size=2.5 ,
+            position = position_dodge(0.9),size=2.5) +
+  labs(fill = "AEoutcome (Adverse Event Outcome)")+
+  ylab("Average waiting to be seen hours")
+
+```
+The analysis reveals varying relationships between waiting to be seen and AE outcomes across different CTAS levels:
+
+CTAS 2 shows minimal difference in waiting to be seen between the two AEoutcome groups.
+
+CTAS 3 and 4 show a trend where positive AE outcomes are associated with greater waiting to be seen, with the difference becoming more pronounced at CTAS 4.
+
+CTAS 5 exhibits a significant difference, with positive AE outcomes associated with much less waiting to be seen compared to negative outcomes.
+
+Overall, the data suggests that the relationship between waiting to be seen and AE outcomes is complex and varies depending on the CTAS level. While some levels show a trend where longer waiting to be seen are associated with positive AE outcomes, others show the opposite.
+
+We can investigate the same concept for each shift block and compare the average waiting to be seen for different group. The result is presented below:
+
+``` {r, layout="l-body-outset" , warning=FALSE ,message=FALSE, echo=FALSE}
+
+g <- result_match_long %>% select(shift_block, waiting_to_be_seen, AEoutcome) %>% group_by(shift_block, AEoutcome) %>% 
+  summarise(Ave_waiting_to_be_seen=mean(waiting_to_be_seen, na.rm=TRUE), n=n(), sd=sd(waiting_to_be_seen,na.rm=TRUE), se=1.96*sd/sqrt(n))
+
+ggplot(data=g, aes(x=shift_block, y=Ave_waiting_to_be_seen, fill=AEoutcome)) + 
+  geom_bar(stat="identity" , position=position_dodge()) +  
+  geom_errorbar(aes(ymin=Ave_waiting_to_be_seen-se, ymax=Ave_waiting_to_be_seen+se), width=.2,position=position_dodge(.9))+
+  scale_fill_manual(values=c("turquoise3", "orangered3"))+
+  geom_text(aes(label=round(Ave_waiting_to_be_seen, digit=1)), vjust=-0.5, hjust=1.3, color="black", size=2.5 ,
+            position = position_dodge(0.9),size=2.5) +
+  labs(fill = "AEoutcome (Adverse Event Outcome)")+
+  ylab("Average waiting to be seen hours")
+
+```
+The analysis reveals different patterns in waiting to be seen and AE outcomes across shift blocks:
+
+Shift Block 0 shows minimal difference in waiting to be seen between the two AEoutcome groups, with a slight reduction in waiting to be seen for those with adverse events.
+
+Shift Block 1 demonstrates a significant increase in waiting to be seen for patients with adverse events compared to those without, indicating a potential correlation between greater waiting to be seen and adverse events in this block.
+Shift Block 2 shows a moderate increase in waiting to be seen for patients with adverse events.
+Overall, the data suggests that the relationship between waiting to be seen and AE outcomes varies depending on the shift block. Shift Block 1, in particular, shows a stronger association between greater waiting to be seen and adverse events. This indicates that factors related to specific shift blocks, such as staffing levels or patient load, might influence waiting to be seen and subsequent adverse events.
+ We can also check this for each site. The result is presented below:
+
+``` {r, layout="l-body-outset" , warning=FALSE ,message=FALSE, echo=FALSE}
+
+g <- result_match_long %>% select(site,waiting_to_be_seen, AEoutcome) %>% group_by(site, AEoutcome) %>% 
+  summarise(Ave_waiting_to_be_seen=mean(waiting_to_be_seen, na.rm=TRUE), n=n(), sd=sd(waiting_to_be_seen,na.rm=TRUE), se=1.96*sd/sqrt(n))
+
+ggplot(data=g, aes(x=site, y=Ave_waiting_to_be_seen, fill=AEoutcome)) + 
+  geom_bar(stat="identity" , position=position_dodge()) +  
+  geom_errorbar(aes(ymin=Ave_waiting_to_be_seen-se, ymax=Ave_waiting_to_be_seen+se), width=.2,position=position_dodge(.9))+
+  scale_fill_manual(values=c("turquoise3", "orangered3"))+
+  scale_fill_manual(values=c("turquoise3", "orangered3"))+
+  geom_text(aes(label=round(Ave_waiting_to_be_seen, digit=1)), vjust=-0.5, hjust=1.1,color="black", size=2.2  ,
+            position = position_dodge(1.1),size=2.2) +
+  scale_x_continuous(breaks=c(0:8))+
+  labs(fill = "AEoutcome")+
+  ylab("Average waiting time to be seen hours")
+
+```
+
+The analysis shows varying relationships between waiting to be seen and AE outcomes across different sites:
+
+Sites 2, 3, and 8 show significant differences, with patients experiencing adverse events having much greater waiting to be seen compared to those without adverse events.
+Sites 0, 1, 4, 5, 6, and 7 show minimal differences, indicating similar waiting to be seen for both AEoutcome groups.
+Overall, the data suggests that at certain sites, greater waiting to be seen are strongly associated with adverse events, while at others, the relationship is not as pronounced. This indicates that factors specific to each site may influence the waiting to be seen and subsequent adverse events. Further investigation into these site-specific factors could help improve patient outcomes by addressing the causes of greater waiting to be seen.
+
+``` {r, warning=FALSE ,message=FALSE, echo=FALSE}
+# separating TRUE AEoutcome
+AE_positive <- subset(sub_select, sub_select$AEoutcome=="TRUE")
+#AE_positive has 8 NA value for "los" for now we remove those rows 
+AE_positive <- AE_positive[which(!is.na(AE_positive$wtbshour)),]
+# separating FALSE AEoutcome
+AE_Negative <- subset(sub_select, sub_select$AEoutcome=="FALSE")
+# Selecting specific feature for matching (shift_block, ageyrs, site, ctas, los)
+AE_positive_s <- AE_positive %>% select(record_id, shift_block, ageyrs, site, ctas, wtbshour, avg_wtbshour_shift,shift_wtbshour_cat ,number_ae, AEoutcome)
+# Renaming AE_negative columns and make it proper to pass to fuzzyjoin function
+AE_Negative_s <- AE_Negative %>% select(record_id, shift_block, ageyrs, site, ctas, wtbshour, avg_wtbshour_shift,shift_wtbshour_cat ,number_ae, AEoutcome)
+AE_Negative_s <- AE_Negative_s %>% rename(record_id_n=record_id ,shift_block_n = shift_block, ageyrs_n=ageyrs, 
+                                          site_n=site, ctas_n=ctas, wtbshour_n=wtbshour, avg_wtbshour_shift_n= avg_wtbshour_shift, 
+                                          shift_wtbshour_cat_n=shift_wtbshour_cat ,number_ae_n=number_ae, AEoutcome_n=AEoutcome)
+sub_select%>%mutate
+
+AE_positive_s$ageyrs_start <- AE_positive$ageyrs* 0.8  # first adding a range for acceptable ageyrs
+AE_positive_s$ageyrs_end <- AE_positive$ageyrs * 1.2   # first adding a range for acceptable ageyrs
+
+result_match<- fuzzyjoin::fuzzy_left_join(
+  AE_positive_s, AE_Negative_s,
+  by = c("shift_block" = "shift_block_n",
+         "site" = "site_n",
+         "ctas" = "ctas_n",
+         "ageyrs_start" = "ageyrs_n",
+         "ageyrs_end" = "ageyrs_n"),
+  match_fun = list(`==`, `==`,`==`, `<=`, `>=`))
+
+result_match <- result_match[-c(1,14)]
+result_match <-result_match[which(!is.na(result_match$wtbshour_n)),]
+
+nm1 <- sub("(\\d+|_n)$", "", names(result_match)) # Changing wide table format to long table format
+lst1 <-  lapply(split.default(result_match, nm1), unlist, use.names = FALSE)
+result_match_long <- data.frame(lapply(lst1, `length<-`, max(lengths(lst1))))[unique(nm1)]
+
+result_match_modified <-result_match[which(!is.na(result_match$wtbshour_n)),]
+result_match_modified <- ungroup(result_match_modified)
+result_match_long<-result_match_long[which(!is.na(result_match_long$wtbshour)),]
+
+
+```
+
+
+
+```{r, layout="l-body-outset" , warning=FALSE ,message=FALSE, echo=FALSE}
+
+library(knitr)
+kable(head(result_match,10))
+
+```
+
+``` {r, layout="l-body-outset" , warning=FALSE ,message=FALSE, echo=FALSE}
+
+g <- result_match_long %>% select(wtbshour,AEoutcome) %>% group_by(AEoutcome) %>% summarise(Ave_wtbshour=mean(wtbshour, na.rm=TRUE), n=n(), sd=sd(wtbshour,na.rm=TRUE), se=1.96*sd/sqrt(n))
+
+ggplot(data=g, aes(x=AEoutcome, y=Ave_wtbshour, fill=AEoutcome)) + 
+  geom_bar(stat="identity" , position=position_dodge()) + 
+  geom_errorbar(aes(ymin=Ave_wtbshour-se, ymax=Ave_wtbshour+se), width=.2,position=position_dodge(.9))+
+  scale_fill_manual(values=c("turquoise3", "orangered3"))+
+  geom_text(aes(label=round(Ave_wtbshour, digit=1)), vjust=-0.5,hjust=1.8, color="black", size=3) +
+  labs(fill = "AEoutcome (Adverse Event Outcome)")+
+  ylab("Average waiting to be seen patients")
+
+```
+The analysis reveals a clear difference in average waiting to be seen between patients with and without adverse events. Patients with positive AE outcomes waiting to be seen greater on average (102.6 units) compared to those with negative AE outcomes (93.6 units). This suggests that greater waiting to be seen patients may be associated with a higher likelihood of adverse events, indicating a potential area for further investigation to improve patient outcomes by reducing queue.
+
+We can also compare the average waiting to be seen for matched data for different ctas:
+
+``` {r, layout="l-body-outset" , warning=FALSE ,message=FALSE, echo=FALSE}
+
+g <- result_match_long %>% select(ctas, wtbshour, AEoutcome) %>% group_by(ctas, AEoutcome) %>% summarise(Ave_wtbshour=mean(wtbshour, na.rm=TRUE), n=n(), sd=sd(wtbshour,na.rm=TRUE), se=1.96*sd/sqrt(n))
+
+ggplot(data=g, aes(x=ctas, y=Ave_wtbshour, fill=AEoutcome)) + 
+  geom_bar(stat="identity" , position=position_dodge()) +
+   geom_errorbar(aes(ymin=Ave_wtbshour-se, ymax=Ave_wtbshour+se), width=.2,position=position_dodge(.9))+
+  scale_fill_manual(values=c("turquoise3", "orangered3"))+
+  geom_text(aes(label=round(Ave_wtbshour, digit=1)), vjust=-0.5,hjust=1.3, color="black", size=2.5 ,
+            position = position_dodge(0.9),size=2.5) +
+  labs(fill = "AEoutcome (Adverse Event Outcome)")+
+  ylab("Average waiting to be seen patients")
+
+```
+The analysis reveals varying relationships between waiting to be seen and AE outcomes across different CTAS levels:
+
+CTAS 2 shows minimal difference in waiting to be seen between the two AEoutcome groups.
+
+CTAS 3 and 4 show a trend where positive AE outcomes are associated with greater waiting to be seen, with the difference becoming more pronounced at CTAS 4.
+
+CTAS 5 exhibits a significant difference, with positive AE outcomes associated with much less waiting to be seen compared to negative outcomes.
+
+Overall, the data suggests that the relationship between waiting to be seen and AE outcomes is complex and varies depending on the CTAS level. While some levels show a trend where longer waiting to be seen are associated with positive AE outcomes, others show the opposite.
+
+We can investigate the same concept for each shift block and compare the average waiting to be seen for different group. The result is presented below:
+
+``` {r, layout="l-body-outset" , warning=FALSE ,message=FALSE, echo=FALSE}
+
+g <- result_match_long %>% select(shift_block, wtbshour, AEoutcome) %>% group_by(shift_block, AEoutcome) %>% 
+  summarise(Ave_wtbshour=mean(wtbshour, na.rm=TRUE), n=n(), sd=sd(wtbshour,na.rm=TRUE), se=1.96*sd/sqrt(n))
+
+ggplot(data=g, aes(x=shift_block, y=Ave_wtbshour, fill=AEoutcome)) + 
+  geom_bar(stat="identity" , position=position_dodge()) +  
+  geom_errorbar(aes(ymin=Ave_wtbshour-se, ymax=Ave_wtbshour+se), width=.2,position=position_dodge(.9))+
+  scale_fill_manual(values=c("turquoise3", "orangered3"))+
+  geom_text(aes(label=round(Ave_wtbshour, digit=1)), vjust=-0.5, hjust=1.3, color="black", size=2.5 ,
+            position = position_dodge(0.9),size=2.5) +
+  labs(fill = "AEoutcome (Adverse Event Outcome)")+
+  ylab("Average waiting to be seen patients")
+
+```
+such as staffing levels or patient load, might influence waiting to be seen and subsequent adverse events.
+ We can also check this for each site. The result is presented below:
+
+``` {r, layout="l-body-outset" , warning=FALSE ,message=FALSE, echo=FALSE}
+
+g <- result_match_long %>% select(site,wtbshour, AEoutcome) %>% group_by(site, AEoutcome) %>% 
+  summarise(Ave_wtbshour=mean(wtbshour, na.rm=TRUE), n=n(), sd=sd(wtbshour,na.rm=TRUE), se=1.96*sd/sqrt(n))
+
+ggplot(data=g, aes(x=site, y=Ave_wtbshour, fill=AEoutcome)) + 
+  geom_bar(stat="identity" , position=position_dodge()) +  
+  geom_errorbar(aes(ymin=Ave_wtbshour-se, ymax=Ave_wtbshour+se), width=.2,position=position_dodge(.9))+
+  scale_fill_manual(values=c("turquoise3", "orangered3"))+
+  scale_fill_manual(values=c("turquoise3", "orangered3"))+
+  geom_text(aes(label=round(Ave_wtbshour, digit=1)), vjust=-0.5, hjust=1.1,color="black", size=2.2  ,
+            position = position_dodge(1.1),size=2.2) +
+  scale_x_continuous(breaks=c(0:8))+
+  labs(fill = "AEoutcome")+
+  ylab("Average waiting time to be seen patients")
+
+```
+
+
+
+``` {r, warning=FALSE ,message=FALSE, echo=FALSE}
+# separating TRUE AEoutcome
+AE_positive <- subset(sub_select, sub_select$AEoutcome=="TRUE")
+#AE_positive has 8 NA value for "los" for now we remove those rows 
+AE_positive <- AE_positive[which(!is.na(AE_positive$censushour)),]
+# separating FALSE AEoutcome
+AE_Negative <- subset(sub_select, sub_select$AEoutcome=="FALSE")
+# Selecting specific feature for matching (shift_block, ageyrs, site, ctas, los)
+AE_positive_s <- AE_positive %>% select(record_id, shift_block, ageyrs, site, ctas, censushour, avg_censushour_shift,shift_censushour_cat ,number_ae, AEoutcome)
+# Renaming AE_negative columns and make it proper to pass to fuzzyjoin function
+AE_Negative_s <- AE_Negative %>% select(record_id, shift_block, ageyrs, site, ctas, censushour, avg_censushour_shift,shift_censushour_cat ,number_ae, AEoutcome)
+AE_Negative_s <- AE_Negative_s %>% rename(record_id_n=record_id ,shift_block_n = shift_block, ageyrs_n=ageyrs, 
+                                          site_n=site, ctas_n=ctas, censushour_n=censushour, avg_censushour_shift_n= avg_censushour_shift, 
+                                          shift_censushour_cat_n=shift_censushour_cat ,number_ae_n=number_ae, AEoutcome_n=AEoutcome)
+sub_select%>%mutate
+
+AE_positive_s$ageyrs_start <- AE_positive$ageyrs* 0.8  # first adding a range for acceptable ageyrs
+AE_positive_s$ageyrs_end <- AE_positive$ageyrs * 1.2   # first adding a range for acceptable ageyrs
+
+result_match<- fuzzyjoin::fuzzy_left_join(
+  AE_positive_s, AE_Negative_s,
+  by = c("shift_block" = "shift_block_n",
+         "site" = "site_n",
+         "ctas" = "ctas_n",
+         "ageyrs_start" = "ageyrs_n",
+         "ageyrs_end" = "ageyrs_n"),
+  match_fun = list(`==`, `==`,`==`, `<=`, `>=`))
+
+result_match <- result_match[-c(1,14)]
+result_match <-result_match[which(!is.na(result_match$censushour_n)),]
+
+nm1 <- sub("(\\d+|_n)$", "", names(result_match)) # Changing wide table format to long table format
+lst1 <-  lapply(split.default(result_match, nm1), unlist, use.names = FALSE)
+result_match_long <- data.frame(lapply(lst1, `length<-`, max(lengths(lst1))))[unique(nm1)]
+
+result_match_modified <-result_match[which(!is.na(result_match$censushour_n)),]
+result_match_modified <- ungroup(result_match_modified)
+result_match_long<-result_match_long[which(!is.na(result_match_long$censushour)),]
+
+
+```
+
+
+
+
+
+```{r, layout="l-body-outset" , warning=FALSE ,message=FALSE, echo=FALSE}
+
+library(knitr)
+kable(head(result_match,10))
+
+```
+``` {r, layout="l-body-outset" , warning=FALSE ,message=FALSE, echo=FALSE}
+
+g <- result_match_long %>% select(censushour,AEoutcome) %>% group_by(AEoutcome) %>% summarise(Ave_censushour=mean(censushour, na.rm=TRUE), n=n(), sd=sd(censushour,na.rm=TRUE), se=1.96*sd/sqrt(n))
+
+ggplot(data=g, aes(x=AEoutcome, y=Ave_censushour, fill=AEoutcome)) + 
+  geom_bar(stat="identity" , position=position_dodge()) + 
+  geom_errorbar(aes(ymin=Ave_censushour-se, ymax=Ave_censushour+se), width=.2,position=position_dodge(.9))+
+  scale_fill_manual(values=c("turquoise3", "orangered3"))+
+  geom_text(aes(label=round(Ave_censushour, digit=1)), vjust=-0.5,hjust=1.8, color="black", size=3) +
+  labs(fill = "AEoutcome (Adverse Event Outcome)")+
+  ylab("Average census patients")
+
+```
+``` {r, layout="l-body-outset" , warning=FALSE ,message=FALSE, echo=FALSE}
+
+g <- result_match_long %>% select(ctas, censushour, AEoutcome) %>% group_by(ctas, AEoutcome) %>% summarise(Ave_censushour=mean(censushour, na.rm=TRUE), n=n(), sd=sd(censushour,na.rm=TRUE), se=1.96*sd/sqrt(n))
+
+ggplot(data=g, aes(x=ctas, y=Ave_censushour, fill=AEoutcome)) + 
+  geom_bar(stat="identity" , position=position_dodge()) +
+   geom_errorbar(aes(ymin=Ave_censushour-se, ymax=Ave_censushour+se), width=.2,position=position_dodge(.9))+
+  scale_fill_manual(values=c("turquoise3", "orangered3"))+
+  geom_text(aes(label=round(Ave_censushour, digit=1)), vjust=-0.5,hjust=1.3, color="black", size=2.5 ,
+            position = position_dodge(0.9),size=2.5) +
+  labs(fill = "AEoutcome (Adverse Event Outcome)")+
+  ylab("Average census patients")
+
+```
+
+``` {r, layout="l-body-outset" , warning=FALSE ,message=FALSE, echo=FALSE}
+
+g <- result_match_long %>% select(shift_block, censushour, AEoutcome) %>% group_by(shift_block, AEoutcome) %>% 
+  summarise(Ave_censushour=mean(censushour, na.rm=TRUE), n=n(), sd=sd(censushour,na.rm=TRUE), se=1.96*sd/sqrt(n))
+
+ggplot(data=g, aes(x=shift_block, y=Ave_censushour, fill=AEoutcome)) + 
+  geom_bar(stat="identity" , position=position_dodge()) +  
+  geom_errorbar(aes(ymin=Ave_censushour-se, ymax=Ave_censushour+se), width=.2,position=position_dodge(.9))+
+  scale_fill_manual(values=c("turquoise3", "orangered3"))+
+  geom_text(aes(label=round(Ave_censushour, digit=1)), vjust=-0.5, hjust=1.3, color="black", size=2.5 ,
+            position = position_dodge(0.9),size=2.5) +
+  labs(fill = "AEoutcome (Adverse Event Outcome)")+
+  ylab("Average census patients")
+
+```
+``` {r, layout="l-body-outset" , warning=FALSE ,message=FALSE, echo=FALSE}
+
+g <- result_match_long %>% select(site,censushour, AEoutcome) %>% group_by(site, AEoutcome) %>% 
+  summarise(Ave_censushour=mean(censushour, na.rm=TRUE), n=n(), sd=sd(censushour,na.rm=TRUE), se=1.96*sd/sqrt(n))
+
+ggplot(data=g, aes(x=site, y=Ave_censushour, fill=AEoutcome)) + 
+  geom_bar(stat="identity" , position=position_dodge()) +  
+  geom_errorbar(aes(ymin=Ave_censushour-se, ymax=Ave_censushour+se), width=.2,position=position_dodge(.9))+
+  scale_fill_manual(values=c("turquoise3", "orangered3"))+
+  scale_fill_manual(values=c("turquoise3", "orangered3"))+
+  geom_text(aes(label=round(Ave_censushour, digit=1)), vjust=-0.5, hjust=1.1,color="black", size=2.2  ,
+            position = position_dodge(1.1),size=2.2) +
+  scale_x_continuous(breaks=c(0:8))+
+  labs(fill = "AEoutcome")+
+  ylab("Average census patients")
+
+```
